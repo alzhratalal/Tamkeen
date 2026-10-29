@@ -151,3 +151,23 @@ padding: 26px 20px;
 }
 
 }
+.password-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-wrapper input {
+    width: 100%;
+    padding-left: 10px;
+    box-sizing: border-box;
+}
+
+.toggle-password {
+    position: absolute;
+    left: 10px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+}
