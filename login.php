@@ -1,58 +1,80 @@
 <?php
 session_start();
-require_once __DIR__ . '/db.php';
+
+/*
+ * وضع تجريبي لعرض صفحات الحساب واستعادة كلمة المرور.
+ * لا يرسل SMS ولا ينشئ مستخدمًا حقيقيًا ولا يغيّر كلمات المرور.
+ * يجب استبدال التدفق التجريبي بعمليات آمنة مرتبطة بقاعدة البيانات قبل النشر.
+ */
+
 if (empty($_SESSION['tamkeen_csrf'])) {
     $_SESSION['tamkeen_csrf'] = bin2hex(random_bytes(32));
 }
+
 function h($value): string {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
+
 function csrf_ok(): bool {
     return isset($_POST['csrf_token'], $_SESSION['tamkeen_csrf'])
         && hash_equals($_SESSION['tamkeen_csrf'], (string)$_POST['csrf_token']);
 }
-$views = [
-    'login',
-    'register',
-    'registered',
-    'forgot',
-    'verify',
-    'reset',
-    'success'
-];
-$view = $_GET['view'] ?? 'login';
+
+function go(string $view): void {
+    header('Location: login.php?view=' . urlencode($view));
+    exit;
+}
+
+function clear_demo_reset(): void {
+    unset(
+        $_SESSION['demo_phone'],
+        $_SESSION['demo_code'],
+        $_SESSION['demo_verified'],
+        $_SESSION['demo_success']
+    );
+}
+
+$views = ['login', 'register', 'registered', 'forgot', 'verify', 'reset', 'success'];
+$view = (string)($_GET['view'] ?? 'login');
 if (!in_array($view, $views, true)) {
     $view = 'login';
 }
+
 $errors = [];
 $notice = '';
+
+/* معالجة النماذج */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_ok()) {
-        $errors[] = 'انتهت صلاحية الطلب. حدّثي الصفحة ثم حاولي مرة أخرى.';
+        $errors[] = 'انتهت صلاحية الطلب. حدّث الصفحة ثم حاول مرة أخرى.';
     } else {
-        $action = $_POST['action'] ?? '';
+        $action = (string)($_POST['action'] ?? '');
+
         if ($action === 'login') {
+            // العرض التجريبي: لا يوجد تحقق فعلي من بيانات الدخول.
+            $view = 'login';
             $phone = trim((string)($_POST['phone'] ?? ''));
             $password = (string)($_POST['password'] ?? '');
             if ($phone === '' || $password === '') {
-                $errors[] = 'أدخلي رقم الجوال وكلمة المرور.';
-            } else {
-                $errors[] = 'تسجيل الدخول غير مفعّل بعد. يلزم ربطه بجدول المستخدمين في قاعدة البيانات.';
+                $errors[] = 'أدخل رقم الجوال وكلمة المرور.';
             }
-            $view = 'login';
+
         } elseif ($action === 'register') {
+            // العرض التجريبي: لا تُحفظ بيانات التسجيل في قاعدة البيانات.
+            $view = 'register';
             $name = trim((string)($_POST['name'] ?? ''));
             $phone = trim((string)($_POST['phone'] ?? ''));
             $password = (string)($_POST['password'] ?? '');
             $confirm = (string)($_POST['confirm_password'] ?? '');
+
             if ($name === '' || $phone === '' || $password === '' || $confirm === '') {
-                $errors[] = 'يرجى تعبئة جميع الحقول.';
+                $errors[] = 'أدخل جميع البيانات المطلوبة.';
             }
             if ($name !== '' && mb_strlen($name) < 3) {
                 $errors[] = 'يجب أن يتكون الاسم من 3 أحرف على الأقل.';
             }
             if ($phone !== '' && !preg_match('/^\+?[0-9\s()\-]{7,20}$/', $phone)) {
-                $errors[] = 'أدخلي رقم جوال صحيحًا.';
+                $errors[] = 'أدخل رقم جوال صحيحًا.';
             }
             if ($password !== '' && strlen($password) < 8) {
                 $errors[] = 'يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.';
@@ -61,53 +83,92 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = 'كلمتا المرور غير متطابقتين.';
             }
             if (!$errors) {
-                $_SESSION['tamkeen_register_name'] = $name;
-                $_SESSION['tamkeen_register_phone'] = $phone;
-                $errors[] = 'واجهة التسجيل جاهزة، لكن حفظ الحساب غير مفعّل حتى الآن. يلزم ربط نموذج التسجيل بجدول المستخدمين في قاعدة البيانات.';
+                $_SESSION['demo_registered'] = true;
+                go('registered');
             }
-            $view = 'register';
+
         } elseif ($action === 'send_code') {
-            $phone = trim((string)($_POST['phone'] ?? ''));
-            if (!preg_match('/^\+?[0-9\s()\-]{7,20}$/', $phone)) {
-                $errors[] = 'أدخلي رقم جوال صحيحًا.';
-            } else {
-                $_SESSION['tamkeen_pending_phone'] =
-                    preg_replace('/[\s()\-]/', '', $phone);
-                $notice = 'واجهة طلب رمز التحقق جاهزة، لكن لم يتم إرسال رسالة SMS. يلزم ربط مزود رسائل.';
-            }
+            // رمز ثابت للعرض التجريبي فقط، لا يُرسل إلى الهاتف.
             $view = 'forgot';
-        } elseif ($action === 'verify_code') {
-            $errors[] = 'التحقق من الرمز غير مفعّل بعد. يلزم ربط خدمة SMS والتحقق من رمز مؤقت آمن.';
+            $phone = trim((string)($_POST['phone'] ?? ''));
+            if ($phone === '') {
+                $errors[] = 'أدخل رقم الجوال.';
+            } elseif (!preg_match('/^\+?[0-9\s()\-]{7,20}$/', $phone)) {
+                $errors[] = 'أدخل رقم جوال صحيحًا.';
+            } else {
+                clear_demo_reset();
+                $_SESSION['demo_phone'] = $phone;
+                $_SESSION['demo_code'] = '123456';
+                go('verify');
+            }
+
+        } elseif ($action === 'resend_code') {
             $view = 'verify';
+            if (empty($_SESSION['demo_phone'])) {
+                $errors[] = 'ابدأ من صفحة استعادة كلمة المرور.';
+                $view = 'forgot';
+            } else {
+                $notice = 'الرمز التجريبي هو 123456. لم تُرسل رسالة نصية.';
+            }
+
+        } elseif ($action === 'verify_code') {
+            $view = 'verify';
+            $code = trim((string)($_POST['code'] ?? ''));
+            if (empty($_SESSION['demo_phone'])) {
+                $errors[] = 'ابدأ من صفحة استعادة كلمة المرور.';
+                $view = 'forgot';
+            } elseif (!preg_match('/^[0-9]{6}$/', $code)) {
+                $errors[] = 'أدخل رمزًا مكوّنًا من 6 أرقام.';
+            } elseif (!hash_equals((string)($_SESSION['demo_code'] ?? ''), $code)) {
+                $errors[] = 'الرمز غير صحيح. استخدم 123456 للتجربة.';
+            } else {
+                $_SESSION['demo_verified'] = true;
+                go('reset');
+            }
+
         } elseif ($action === 'reset_password') {
+            // العرض التجريبي: لا تتغير كلمة مرور أي حساب فعليًا.
+            $view = 'reset';
             $password = (string)($_POST['new_password'] ?? '');
             $confirm = (string)($_POST['confirm_password'] ?? '');
-            if (strlen($password) < 8) {
+            if (empty($_SESSION['demo_verified'])) {
+                $errors[] = 'يجب التحقق من الرمز أولًا.';
+                $view = 'forgot';
+            } elseif (strlen($password) < 8) {
                 $errors[] = 'يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.';
-            }
-            if ($password !== $confirm) {
+            } elseif ($password !== $confirm) {
                 $errors[] = 'كلمتا المرور غير متطابقتين.';
+            } else {
+                clear_demo_reset();
+                $_SESSION['demo_success'] = true;
+                go('success');
             }
-            if (!$errors) {
-                $errors[] = 'تغيير كلمة المرور غير مفعّل حتى الآن. يجب ربطه بقاعدة البيانات والتحقق من رمز الجوال.';
-            }
-            $view = 'reset';
         }
     }
 }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST'
-    && isset($_GET['view'])
-    && in_array($_GET['view'], $views, true)) {
-    $view = $_GET['view'];
+
+/* حماية ترتيب الصفحات التجريبية */
+if ($view === 'registered' && empty($_SESSION['demo_registered'])) {
+    $view = 'register';
 }
+if ($view === 'verify' && empty($_SESSION['demo_phone'])) {
+    $view = 'forgot';
+}
+if ($view === 'reset' && empty($_SESSION['demo_verified'])) {
+    $view = 'forgot';
+}
+if ($view === 'success' && empty($_SESSION['demo_success'])) {
+    $view = 'login';
+}
+
 $titles = [
     'login' => 'تسجيل الدخول',
-    'register' => 'إنشاء حساب',
-    'registered' => 'تأكيد التسجيل',
-    'forgot' => 'نسيت كلمة المرور؟',
-    'verify' => 'التحقق من رقم الجوال',
-    'reset' => 'كلمة مرور جديدة',
-    'success' => 'تم تغيير كلمة المرور'
+    'register' => 'إنشاء حساب جديد',
+    'registered' => 'تأكيد إنشاء الحساب',
+    'forgot' => 'استعادة كلمة المرور',
+    'verify' => 'التحقق من الرمز',
+    'reset' => 'إنشاء كلمة مرور جديدة',
+    'success' => 'اكتمال استعادة كلمة المرور'
 ];
 ?>
 <!DOCTYPE html>
@@ -115,276 +176,322 @@ $titles = [
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= h($titles[$view]) ?></title>
+<title><?= h($titles[$view]) ?> | تمكين</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
+
 :root {
     --navy: #103B63;
     --blue: #245A83;
-    --white: #fff;
     --heading: #102C4C;
     --text: #344054;
     --muted: #687789;
-    --border: #E3E8EF;
-    --shadow: 0 12px 35px rgba(16,44,76,.10);
-    --radius: 14px;
+    --border: #DFE7EF;
+    --white: #FFFFFF;
+    --radius: 20px;
+    --shadow: 0 24px 70px rgba(16, 44, 76, .075), 0 4px 18px rgba(16, 44, 76, .035);
 }
-* {
-    box-sizing: border-box;
-}
-html {
-    min-height: 100%;
-}
+*, *::before, *::after { box-sizing: border-box; }
+html { min-height: 100%; }
 body {
     margin: 0;
     min-height: 100vh;
-    background: linear-gradient(135deg, #fff, #F6F8FA);
+    direction: rtl;
+    background: radial-gradient(ellipse 70% 55% at 50% 5%, #EAF1F8 0%, transparent 80%), #F8FAFC;
     color: var(--text);
-    font-family: Tahoma, Arial, sans-serif;
+    font-family: 'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif;
     font-size: 15px;
-    line-height: 1.7;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
 }
-a {
-    color: inherit;
-    text-decoration: none;
-}
-button,
-input {
-    font: inherit;
-}
-button:focus-visible,
-a:focus-visible,
-input:focus-visible {
-    outline: 3px solid rgba(36,90,131,.25);
+a { color: inherit; text-decoration: none; }
+button, input { font: inherit; }
+button, a, input { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible, input:focus-visible {
+    outline: 3px solid rgba(36, 90, 131, .24);
     outline-offset: 3px;
 }
-/* توسيط جميع صفحات المصادقة */
 .page {
-    width: min(480px, calc(100% - 32px));
-    min-height: 100vh;
+    width: min(468px, calc(100% - 36px));
+    min-height: calc(100vh - 40px);
     margin: 0 auto;
-    padding: 28px 0;
+    padding: 40px 0 22px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 .card {
     width: 100%;
-    background: #fff;
-    border: 1px solid var(--border);
+    min-width: 0;
+    padding: clamp(30px, 6vw, 46px);
+    background: rgba(255, 255, 255, .98);
+    border: 1px solid rgba(218, 228, 238, .95);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    padding: clamp(24px, 5vw, 42px);
-    min-width: 0;
+    direction: rtl;
 }
-/* العناوين */
+/* العنوان والوصف في الوسط في جميع الصفحات */
 .card h2 {
-    margin: 0 0 8px;
+    margin: 0 0 9px;
     color: var(--heading);
-    font-size: 30px;
-    line-height: 1.4;
+    font-size: clamp(25px, 4vw, 29px);
+    font-weight: 700;
+    line-height: 1.55;
+    letter-spacing: -.45px;
+    text-align: center;
 }
 .subtitle {
-    margin: 0 0 26px;
+    margin: 0 0 30px;
     color: var(--muted);
-    font-size: 15px;
-    line-height: 1.9;
+    font-size: 14px;
+    line-height: 2;
+    font-weight: 400;
+    text-align: center;
 }
-/* الحقول */
-.field {
-    margin-bottom: 17px;
-}
+.field { margin-bottom: 20px; }
 .field label {
     display: block;
-    margin-bottom: 8px;
-    font-size: 14px;
-    font-weight: 700;
+    margin-bottom: 9px;
+    font-size: 13px;
+    font-weight: 600;
     color: var(--heading);
+    text-align: right;
+    direction: rtl;
 }
+/* هذا هو كلاس الحقول الموجود في المشروع بالفعل */
 .field input {
     display: block;
     width: 100%;
-    min-height: 52px;
-    padding: 12px 15px;
-    border: 1px solid #D8E0E8;
-    border-radius: 10px;
-    background: #fff;
-    color: var(--text);
-    transition: border-color .2s, box-shadow .2s;
+    min-height: 54px;
+    padding: 12px 17px;
+    border: 1px solid #DCE5EE;
+    border-radius: 12px;
+    background: #FCFDFE;
+    color: var(--heading);
+    font-size: 14px;
+    font-weight: 500;
+    direction: rtl;
+    text-align: right;
+    transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
 }
+.field input:hover { border-color: #B9C9D9; }
 .field input:focus {
-    border-color: var(--blue);
-    box-shadow: 0 0 0 3px rgba(36,90,131,.1);
     outline: none;
+    border-color: #48789F;
+    background: #FFFFFF;
+    box-shadow: 0 0 0 4px rgba(36, 90, 131, .09);
 }
 .field input::placeholder {
-    color: #9AA5B1;
+    color: #9AA9B9;
+    font-weight: 400;
+    direction: rtl;
+    text-align: right;
 }
-/* صف التذكر واستعادة كلمة المرور */
 .form-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-wrap: wrap;
     gap: 12px;
-    margin: 2px 0 22px;
+    flex-wrap: wrap;
+    margin: 3px 0 26px;
     font-size: 13px;
+    direction: rtl;
 }
+/* مربع الاختيار بجانب «تذكرني» على اليمين */
 .remember {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 7px;
+    flex-direction: row;
+    gap: 9px;
     color: var(--muted);
+    cursor: pointer;
+    direction: rtl;
 }
-.remember input {
-    accent-color: var(--navy);
-}
-.text-link {
-    color: var(--navy);
-    font-weight: 700;
-}
-/* الأزرار */
+.remember input { width: 16px; height: 16px; margin: 0; accent-color: var(--navy); }
+.text-link, .resend-button { color: var(--navy); font-weight: 600; transition: color .2s ease; }
+.text-link:hover, .resend-button:hover { color: #39759F; }
 .btn {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 100%;
-    min-height: 52px;
-    padding: 12px 16px;
-    border: 0;
-    border-radius: 10px;
-    background: var(--navy);
-    color: #fff;
+    min-height: 54px;
+    padding: 12px 18px;
+    border: 1px solid #103B63;
+    border-radius: 12px;
+    background: linear-gradient(110deg, #103B63, #1C507A);
+    color: #FFFFFF;
+    font-size: 14px;
     font-weight: 700;
+    text-align: center;
     cursor: pointer;
-    transition: background .2s, transform .2s;
+    box-shadow: 0 7px 15px rgba(16, 59, 99, .13);
+    transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
 }
 .btn:hover {
-    background: var(--blue);
-    transform: translateY(-1px);
+    background: linear-gradient(110deg, #174C77, #28618A);
+    transform: none;
+    box-shadow: 0 4px 10px rgba(16, 59, 99, 0.08);
 }
+.btn:active { transform: translateY(0); box-shadow: 0 4px 10px rgba(16, 59, 99, .12); }
 .secondary {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 100%;
-    min-height: 49px;
-    padding: 10px 15px;
-    margin-top: 12px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: #fff;
+    min-height: 52px;
+    padding: 11px 16px;
+    margin-top: 14px;
+    border: 1px solid #DCE5EE;
+    border-radius: 12px;
+    background: #FFFFFF;
     color: var(--navy);
-    font-weight: 700;
-}
-.bottom-note {
-    text-align: center;
-    margin: 23px 0 0;
     font-size: 14px;
-    color: var(--muted);
+    font-weight: 600;
+    transition: background .2s ease, border-color .2s ease;
 }
-/* رسائل التنبيه */
-.alert {
-    padding: 12px 14px;
-    margin: 0 0 18px;
-    border-radius: 9px;
-    font-size: 13px;
-    line-height: 1.8;
-    overflow-wrap: anywhere;
-}
-.error {
-    background: #FFF0F0;
-    border: 1px solid #F5CACA;
-    color: #9B2525;
-}
-.success-alert {
-    background: #F0FAF3;
-    border: 1px solid #CBEBD4;
-    color: #236B3A;
-}
-.alert ul {
-    margin: 0;
-    padding-right: 20px;
-}
-/* رمز التحقق */
+.secondary:hover { background: #F6F9FC; border-color: #B9CADB; }
+.bottom-note { margin: 27px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
+.bottom-note .text-link { margin-right: 3px; }
+.alert { padding: 13px 16px; margin: 0 0 22px; border-radius: 12px; font-size: 13px; line-height: 1.9; overflow-wrap: anywhere; }
+.error { background: #FFF5F5; border: 1px solid #F2D7D7; color: #9B3030; }
+.success-alert { background: #F1FAF5; border: 1px solid #D0E9DB; color: #236B3A; }
+.alert ul { margin: 0; padding-right: 19px; }
+/* خانات الرمز مستثناة من محاذاة النصوص لليمين */
 .code-inputs {
     display: flex;
     direction: ltr;
-    gap: 8px;
-    justify-content: space-between;
-    margin: 20px 0;
+    gap: 9px;
+    justify-content: center;
+    margin: 24px 0 27px;
 }
 .code-inputs input {
-    width: calc((100% - 40px) / 6);
+    width: calc((100% - 45px) / 6);
     min-width: 0;
-    height: 52px;
+    height: 54px;
+    border: 1px solid #DCE5EE;
+    border-radius: 12px;
+    background: #FCFDFE;
+    color: var(--navy);
     text-align: center;
-    font-size: 22px;
-    font-weight: 800;
-    border: 1px solid #D8E0E8;
-    border-radius: 9px;
+    direction: ltr;
+    font-size: 23px;
+    font-weight: 700;
+    transition: border-color .2s ease, box-shadow .2s ease;
 }
-.hint {
-    font-size: 12px;
-    color: var(--muted);
-    line-height: 1.9;
-    margin: 0 0 18px;
-}
-/* نجاح العملية */
+.code-inputs input:focus { outline: none; border-color: #48789F; box-shadow: 0 0 0 3px rgba(36, 90, 131, .1); background: #FFFFFF; }
+.hint { margin: -1px 0 21px; color: var(--muted); font-size: 12px; line-height: 2; text-align: right; }
 .success-mark {
-    width: 66px;
-    height: 66px;
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 72px;
+    height: 72px;
+    margin: 2px auto 23px;
+    border: 1px solid #D3EBDD;
     border-radius: 50%;
-    background: #EAF8EE;
-    color: #208044;
+    background: #EDF9F1;
+    color: #23824C;
     font-size: 34px;
-    margin: 0 auto 20px;
+    font-weight: 700;
 }
-.center {
-    text-align: center;
-}
-.footer {
-    text-align: center;
-    padding: 0 16px 20px;
+.center { text-align: center; }
+.card h2.center { font-size: 26px; }
+.subtitle.center { margin-bottom: 30px; }
+.footer { padding: 0 16px 20px; text-align: center; color: #8A9AA9; font-size: 11px; }
+.demo-code {
+    margin-bottom: 23px;
+    padding: 14px 18px;
+    border: 1px solid #DEE8F1;
+    border-radius: 12px;
+    background: #F5F9FC;
     color: var(--muted);
-    font-size: 11px;
+    text-align: center;
+    font-size: 12px;
 }
+.demo-code strong {
+    display: block;
+    margin-top: 3px;
+    color: var(--navy);
+    font-size: 25px;
+    font-weight: 700;
+    letter-spacing: 7px;
+    direction: ltr;
+}
+/* تخفيف حدود البطاقة والظل */
+.card {
+    border: 1px solid #EDF1F5;
+    box-shadow: 0 12px 35px rgba(16, 44, 76, 0.035);
+}
+
+/* تخفيف حدود حقول الإدخال */
+.field input {
+    border: 1px solid #E8EDF3;
+    background: #FCFDFE;
+}
+
+/* تخفيف الحدود عند الضغط على الحقل */
+.field input:focus {
+    outline: none;
+    border-color: #B8CADB;
+    box-shadow: 0 0 0 3px rgba(36, 90, 131, 0.045);
+}
+
+/* تخفيف حدود الأزرار والظل */
+.btn {
+    border: 1px solid transparent;
+    box-shadow: 0 4px 10px rgba(16, 59, 99, 0.06);
+}
+
+/* مسافة بين وصف النجاح والزر */
+.success-mark ~ .subtitle {
+    margin-bottom: 40px;
+}
+
+/* مسافة بين العنوان والوصف */
+.card h2 {
+    margin-bottom: 15px;
+}
+
+/* تخفيف حدود حقول رمز التحقق */
+.code-inputs input {
+    border-color: #E8EDF3;
+}
+
+.code-inputs input:focus {
+    border-color: #B8CADB;
+    box-shadow: 0 0 0 3px rgba(36, 90, 131, 0.045);
+}
+.resend-area { display: flex; align-items: center; justify-content: center; gap: 18px; flex-wrap: wrap; margin: 23px 0 0; color: var(--muted); font-size: 13px; }
+.resend-area form { margin: 0; }
+.resend-area span { white-space: nowrap; }
+.resend-button { padding: 0; border: 0; background: transparent; font-size: 13px; white-space: nowrap; cursor: pointer; }
 @media (max-width: 480px) {
-    .page {
-        width: calc(100% - 24px);
-        padding: 18px 0;
-    }
-    .card {
-        padding: 27px 21px;
-    }
-    .card h2 {
-        font-size: 26px;
-    }
-    .subtitle {
-        font-size: 14px;
-    }
+    .page { width: calc(100% - 26px); min-height: calc(100vh - 32px); padding: 20px 0 12px; }
+    .card { padding: 31px 24px; border-radius: 18px; }
+    .card h2 { font-size: 26px; }
+    .subtitle { margin-bottom: 25px; }
+    .code-inputs { gap: 7px; }
+    .code-inputs input { width: calc((100% - 35px) / 6); height: 49px; font-size: 21px; }
+    .resend-area { gap: 13px; }
 }
 @media (max-width: 360px) {
-    .page {
-        width: calc(100% - 18px);
-    }
-    .card {
-        padding: 22px 15px;
-    }
-    .code-inputs {
-        gap: 5px;
-    }
-    .code-inputs input {
-        height: 45px;
-    }
+    .page { width: calc(100% - 18px); }
+    .card { padding: 26px 17px; }
+    .code-inputs { gap: 5px; }
+    .code-inputs input { width: calc((100% - 25px) / 6); height: 45px; border-radius: 9px; }
+    .resend-area { gap: 8px; font-size: 12px; }
+    .resend-button { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 </style>
 </head>
 <body>
 <main class="page">
 <section class="card">
+
 <?php if ($errors): ?>
 <div class="alert error" role="alert">
     <ul>
@@ -394,50 +501,35 @@ input:focus-visible {
     </ul>
 </div>
 <?php endif; ?>
+
 <?php if ($notice !== ''): ?>
-<div class="alert success-alert" role="status">
-    <?= h($notice) ?>
-</div>
+<div class="alert success-alert" role="status"><?= h($notice) ?></div>
 <?php endif; ?>
+
 <?php if ($view === 'login'): ?>
 <h2>تسجيل الدخول</h2>
-<p class="subtitle">
-أدخلي رقم الجوال وكلمة المرور للدخول إلى حسابك.
-</p>
+<p class="subtitle">أدخل رقم الجوال وكلمة المرور لتسجيل الدخول إلى حسابك.</p>
+
 <form method="post" action="login.php" autocomplete="on">
     <input type="hidden" name="csrf_token" value="<?= h($_SESSION['tamkeen_csrf']) ?>">
     <input type="hidden" name="action" value="login">
     <div class="field">
         <label for="phone">رقم الجوال</label>
-        <input
-            id="phone"
-            name="phone"
-            type="tel"
-            inputmode="tel"
-            autocomplete="tel"
-            placeholder="أدخلي رقم الجوال"
-            required
-        >
+        <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+               placeholder="أدخل رقم الجوال" dir="rtl"
+               value="<?= h((($_POST['action'] ?? '') === 'login') ? ($_POST['phone'] ?? '') : '') ?>" required>
     </div>
     <div class="field">
         <label for="password">كلمة المرور</label>
-        <input
-            id="password"
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            placeholder="أدخلي كلمة المرور"
-            required
-        >
+        <input id="password" name="password" type="password" autocomplete="current-password"
+               placeholder="أدخل كلمة المرور" dir="rtl" required>
     </div>
     <div class="form-row">
         <label class="remember">
             <input type="checkbox" name="remember" value="1">
-            تذكرني
+            <span>تذكرني</span>
         </label>
-        <a class="text-link" href="login.php?view=forgot">
-            نسيت كلمة المرور؟
-        </a>
+        <a class="text-link" href="login.php?view=forgot">نسيت كلمة المرور؟</a>
     </div>
     <button class="btn" type="submit">تسجيل الدخول</button>
 </form>
@@ -445,180 +537,117 @@ input:focus-visible {
     ليس لديك حساب؟
     <a class="text-link" href="login.php?view=register">إنشاء حساب جديد</a>
 </p>
+
 <?php elseif ($view === 'register'): ?>
 <h2>إنشاء حساب جديد</h2>
-<p class="subtitle">
-أنشئي حسابك لتتمكني من متابعة مشترياتك وطلباتك.
-</p>
-<form method="post" action="login.php?view=register" autocomplete="on">
+<p class="subtitle">أنشئ حسابًا جديدًا لمتابعة مشترياتك وطلباتك.</p>
+<form method="post" action="login.php?view=register" autocomplete="on" id="registerForm">
     <input type="hidden" name="csrf_token" value="<?= h($_SESSION['tamkeen_csrf']) ?>">
     <input type="hidden" name="action" value="register">
     <div class="field">
         <label for="name">الاسم الكامل</label>
-        <input
-            id="name"
-            name="name"
-            type="text"
-            autocomplete="name"
-            placeholder="أدخلي الاسم الكامل"
-            minlength="3"
-            value="<?= h($_POST['name'] ?? '') ?>"
-            required
-        >
+        <input id="name" name="name" type="text" autocomplete="name"
+               placeholder="أدخل الاسم الكامل" dir="rtl" minlength="3"
+               value="<?= h($_POST['name'] ?? '') ?>" required>
     </div>
     <div class="field">
         <label for="register_phone">رقم الجوال</label>
-        <input
-            id="register_phone"
-            name="phone"
-            type="tel"
-            inputmode="tel"
-            autocomplete="tel"
-            placeholder="أدخلي رقم الجوال"
-            value="<?= h($_POST['phone'] ?? '') ?>"
-            required
-        >
+        <input id="register_phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+               placeholder="أدخل رقم الجوال" dir="rtl"
+               value="<?= h($_POST['phone'] ?? '') ?>" required>
     </div>
     <div class="field">
         <label for="register_password">كلمة المرور</label>
-        <input
-            id="register_password"
-            name="password"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            placeholder="8 أحرف على الأقل"
-            required
-        >
+        <input id="register_password" name="password" type="password" autocomplete="new-password"
+               minlength="8" placeholder="أدخل كلمة المرور" dir="rtl" required>
     </div>
     <div class="field">
         <label for="confirm_password">تأكيد كلمة المرور</label>
-        <input
-            id="confirm_password"
-            name="confirm_password"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            placeholder="أعيدي كتابة كلمة المرور"
-            required
-        >
+        <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password"
+               minlength="8" placeholder="أعد كتابة كلمة المرور" dir="rtl" required>
     </div>
-    <p class="hint">
-        استخدمي كلمة مرور لا تقل عن 8 أحرف.
-    </p>
+    <p class="hint">يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.</p>
     <button class="btn" type="submit">إنشاء الحساب</button>
 </form>
 <a class="secondary" href="login.php">العودة إلى تسجيل الدخول</a>
+
 <?php elseif ($view === 'registered'): ?>
 <div class="success-mark" aria-hidden="true">✓</div>
-<h2 class="center">تم إرسال بيانات التسجيل</h2>
-<p class="subtitle center">
-هذه صفحة تأكيد شكلية. لن يتم إنشاء الحساب فعليًا حتى يتم ربط التسجيل بقاعدة البيانات.
-</p>
+<h2>اكتملت خطوات إنشاء الحساب!</h2>
 <a class="btn" href="login.php">العودة إلى تسجيل الدخول</a>
+
 <?php elseif ($view === 'forgot'): ?>
-<h2>نسيت كلمة المرور؟</h2>
-<p class="subtitle">
-أدخلي رقم الجوال المرتبط بحسابك لبدء استعادة كلمة المرور.
-</p>
+<h2>استعادة كلمة المرور</h2>
+<p class="subtitle">أدخل رقم الجوال للمتابعة إلى صفحة التحقق من الرمز.</p>
 <form method="post" action="login.php?view=forgot" autocomplete="on">
     <input type="hidden" name="csrf_token" value="<?= h($_SESSION['tamkeen_csrf']) ?>">
     <input type="hidden" name="action" value="send_code">
     <div class="field">
         <label for="forgot_phone">رقم الجوال</label>
-        <input
-            id="forgot_phone"
-            name="phone"
-            type="tel"
-            inputmode="tel"
-            autocomplete="tel"
-            placeholder="أدخلي رقم الجوال مع رمز الدولة"
-            value="<?= h($_POST['phone'] ?? '') ?>"
-            required
-        >
+        <input id="forgot_phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+               placeholder="أدخل رقم الجوال" dir="rtl"
+               value="<?= h($_POST['phone'] ?? '') ?>" required>
     </div>
-    <button class="btn" type="submit">إرسال رمز التحقق</button>
+    <button class="btn" type="submit">متابعة</button>
 </form>
-<a class="secondary" href="login.php">العودة لتسجيل الدخول</a>
+<a class="secondary" href="login.php">العودة إلى تسجيل الدخول</a>
+
 <?php elseif ($view === 'verify'): ?>
-<h2>التحقق من رقم الجوال</h2>
-<p class="subtitle">
-أدخلي رمز التحقق المكوّن من 6 أرقام.
-</p>
+<h2>التحقق من الرمز</h2>
+<p class="subtitle">أدخل رمز التحقق المكوّن من 6 أرقام.</p>
+<div class="demo-code">رمز التحقق للعرض التجريبي فقط:<strong>123456</strong></div>
 <form method="post" action="login.php?view=verify" id="verifyForm">
     <input type="hidden" name="csrf_token" value="<?= h($_SESSION['tamkeen_csrf']) ?>">
     <input type="hidden" name="action" value="verify_code">
     <input type="hidden" name="code" id="combinedCode">
     <div class="code-inputs" aria-label="رمز التحقق">
         <?php for ($i = 0; $i < 6; $i++): ?>
-            <input
-                class="code-digit"
-                type="text"
-                inputmode="numeric"
-                pattern="[0-9]*"
-                maxlength="1"
-                aria-label="الخانة <?= $i + 1 ?>"
-                required
-            >
+            <input class="code-digit" type="text" inputmode="numeric" pattern="[0-9]"
+                   maxlength="1" autocomplete="off" aria-label="الخانة <?= $i + 1 ?>" required>
         <?php endfor; ?>
     </div>
-    <p class="hint">
-        التحقق الفعلي يتطلب ربط خدمة الرسائل النصية.
-    </p>
     <button class="btn" type="submit">التحقق من الرمز</button>
 </form>
-<a class="secondary" href="login.php?view=forgot">تغيير رقم الجوال</a>
+<div class="resend-area">
+    <span>لم يصلك الرمز؟</span>
+    <form method="post" action="login.php?view=verify">
+        <input type="hidden" name="csrf_token" value="<?= h($_SESSION['tamkeen_csrf']) ?>">
+        <input type="hidden" name="action" value="resend_code">
+        <button class="resend-button" type="submit">إعادة إرسال الرمز</button>
+    </form>
+</div>
+
 <?php elseif ($view === 'reset'): ?>
 <h2>إنشاء كلمة مرور جديدة</h2>
-<p class="subtitle">
-اختاري كلمة مرور جديدة ثم أعيدي كتابتها للتأكيد.
-</p>
+<p class="subtitle">أدخل كلمة المرور الجديدة ثم أعد كتابتها للتأكيد.</p>
 <form method="post" action="login.php?view=reset" id="resetForm">
     <input type="hidden" name="csrf_token" value="<?= h($_SESSION['tamkeen_csrf']) ?>">
     <input type="hidden" name="action" value="reset_password">
     <div class="field">
         <label for="new_password">كلمة المرور الجديدة</label>
-        <input
-            id="new_password"
-            name="new_password"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            placeholder="كلمة المرور الجديدة"
-            required
-        >
+        <input id="new_password" name="new_password" type="password" autocomplete="new-password"
+               minlength="8" placeholder="أدخل كلمة المرور الجديدة" dir="rtl" required>
     </div>
     <div class="field">
         <label for="confirm_new_password">تأكيد كلمة المرور</label>
-        <input
-            id="confirm_new_password"
-            name="confirm_password"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            placeholder="أعيدي كتابة كلمة المرور"
-            required
-        >
+        <input id="confirm_new_password" name="confirm_password" type="password" autocomplete="new-password"
+               minlength="8" placeholder="أعد كتابة كلمة المرور" dir="rtl" required>
     </div>
-    <p class="hint">
-        يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.
-    </p>
+    <p class="hint">يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.</p>
     <button class="btn" type="submit">إعادة تعيين كلمة المرور</button>
 </form>
-<a class="secondary" href="login.php">العودة لتسجيل الدخول</a>
+<a class="secondary" href="login.php">العودة إلى تسجيل الدخول</a>
+
 <?php elseif ($view === 'success'): ?>
 <div class="success-mark" aria-hidden="true">✓</div>
-<h2 class="center">تم تغيير كلمة المرور بنجاح</h2>
-<p class="subtitle center">
-يمكنك الآن العودة إلى صفحة تسجيل الدخول.
-</p>
-<a class="btn" href="login.php">العودة لتسجيل الدخول</a>
+<h2>اكتملت خطوات استعادة كلمة المرور!</h2>
+<a class="btn" href="login.php">العودة إلى تسجيل الدخول</a>
 <?php endif; ?>
+
 </section>
 </main>
-<footer class="footer">
-    © 2026 جميع الحقوق محفوظة.
-</footer>
+<footer class="footer">© 2026 جميع الحقوق محفوظة.</footer>
+
 <script>
 (function () {
     const digits = [...document.querySelectorAll('.code-digit')];
@@ -627,38 +656,30 @@ input:focus-visible {
         digits.forEach((input, index) => {
             input.addEventListener('input', function () {
                 this.value = this.value.replace(/\D/g, '').slice(-1);
-                if (this.value && index < digits.length - 1) {
-                    digits[index + 1].focus();
-                }
+                if (this.value && index < digits.length - 1) digits[index + 1].focus();
             });
             input.addEventListener('keydown', function (event) {
                 if (event.key === 'Backspace' && !this.value && index > 0) {
                     digits[index - 1].focus();
                 }
-                if (event.key === 'ArrowLeft' && index > 0) {
-                    digits[index - 1].focus();
-                }
-                if (event.key === 'ArrowRight' && index < digits.length - 1) {
-                    digits[index + 1].focus();
-                }
+                if (event.key === 'ArrowLeft' && index > 0) digits[index - 1].focus();
+                if (event.key === 'ArrowRight' && index < digits.length - 1) digits[index + 1].focus();
             });
             input.addEventListener('paste', function (event) {
-                const pasted = (
-                    event.clipboardData || window.clipboardData
-                ).getData('text').replace(/\D/g, '').slice(0, 6);
+                const pasted = (event.clipboardData || window.clipboardData)
+                    .getData('text').replace(/\D/g, '').slice(0, 6);
                 if (!pasted) return;
                 event.preventDefault();
-                pasted.split('').forEach((value, index) => {
-                    if (digits[index]) {
-                        digits[index].value = value;
-                    }
+                digits.forEach(field => { field.value = ''; });
+                pasted.split('').forEach((value, i) => {
+                    if (digits[i]) digits[i].value = value;
                 });
-                digits[Math.min(pasted.length, digits.length) - 1]?.focus();
+                digits[Math.min(pasted.length, digits.length) - 1].focus();
             });
         });
         verifyForm.addEventListener('submit', function (event) {
             const code = digits.map(input => input.value).join('');
-            if (code.length !== 6) {
+            if (!/^\d{6}$/.test(code)) {
                 event.preventDefault();
                 digits.find(input => !input.value)?.focus();
                 return;
@@ -666,11 +687,13 @@ input:focus-visible {
             document.getElementById('combinedCode').value = code;
         });
     }
-    const resetForm = document.getElementById('resetForm');
-    if (resetForm) {
-        const password = document.getElementById('new_password');
-        const confirm = document.getElementById('confirm_new_password');
-        resetForm.addEventListener('submit', function (event) {
+
+    function enablePasswordMatch(formId, passwordId, confirmId) {
+        const form = document.getElementById(formId);
+        if (!form) return;
+        const password = document.getElementById(passwordId);
+        const confirm = document.getElementById(confirmId);
+        form.addEventListener('submit', function (event) {
             if (password.value !== confirm.value) {
                 event.preventDefault();
                 confirm.setCustomValidity('كلمتا المرور غير متطابقتين.');
@@ -679,29 +702,10 @@ input:focus-visible {
                 confirm.setCustomValidity('');
             }
         });
-        confirm.addEventListener('input', function () {
-            confirm.setCustomValidity('');
-        });
+        confirm.addEventListener('input', function () { confirm.setCustomValidity(''); });
     }
-    const registerForm = document.querySelector(
-        'form input[name="action"][value="register"]'
-    )?.closest('form');
-    if (registerForm) {
-        const password = document.getElementById('register_password');
-        const confirm = document.getElementById('confirm_password');
-        registerForm.addEventListener('submit', function (event) {
-            if (password.value !== confirm.value) {
-                event.preventDefault();
-                confirm.setCustomValidity('كلمتا المرور غير متطابقتين.');
-                confirm.reportValidity();
-            } else {
-                confirm.setCustomValidity('');
-            }
-        });
-        confirm.addEventListener('input', function () {
-            confirm.setCustomValidity('');
-        });
-    }
+    enablePasswordMatch('registerForm', 'register_password', 'confirm_password');
+    enablePasswordMatch('resetForm', 'new_password', 'confirm_new_password');
 })();
 </script>
 </body>
