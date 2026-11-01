@@ -57,8 +57,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $password = (string)($_POST['password'] ?? '');
             if ($phone === '' || $password === '') {
                 $errors[] = 'أدخل رقم الجوال وكلمة المرور.';
-            } else {
-                $notice = 'تسجيل الدخول غير مفعّل حاليًا؛ هذه صفحة تجريبية.';
             }
 
         } elseif ($action === 'register') {
@@ -332,8 +330,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .btn:hover {
     background: linear-gradient(110deg, #174C77, #28618A);
-    transform: translateY(-1px);
-    box-shadow: 0 10px 22px rgba(16, 59, 99, .17);
+    transform: none;
+    box-shadow: 0 4px 10px rgba(16, 59, 99, 0.08);
 }
 .btn:active { transform: translateY(0); box-shadow: 0 4px 10px rgba(16, 59, 99, .12); }
 .secondary {
@@ -419,6 +417,50 @@ button:focus-visible, a:focus-visible, input:focus-visible {
     font-weight: 700;
     letter-spacing: 7px;
     direction: ltr;
+}
+/* تخفيف حدود البطاقة والظل */
+.card {
+    border: 1px solid #EDF1F5;
+    box-shadow: 0 12px 35px rgba(16, 44, 76, 0.035);
+}
+
+/* تخفيف حدود حقول الإدخال */
+.field input {
+    border: 1px solid #E8EDF3;
+    background: #FCFDFE;
+}
+
+/* تخفيف الحدود عند الضغط على الحقل */
+.field input:focus {
+    outline: none;
+    border-color: #B8CADB;
+    box-shadow: 0 0 0 3px rgba(36, 90, 131, 0.045);
+}
+
+/* تخفيف حدود الأزرار والظل */
+.btn {
+    border: 1px solid transparent;
+    box-shadow: 0 4px 10px rgba(16, 59, 99, 0.06);
+}
+
+/* مسافة بين وصف النجاح والزر */
+.success-mark ~ .subtitle {
+    margin-bottom: 40px;
+}
+
+/* مسافة بين العنوان والوصف */
+.card h2 {
+    margin-bottom: 15px;
+}
+
+/* تخفيف حدود حقول رمز التحقق */
+.code-inputs input {
+    border-color: #E8EDF3;
+}
+
+.code-inputs input:focus {
+    border-color: #B8CADB;
+    box-shadow: 0 0 0 3px rgba(36, 90, 131, 0.045);
 }
 .resend-area { display: flex; align-items: center; justify-content: center; gap: 18px; flex-wrap: wrap; margin: 23px 0 0; color: var(--muted); font-size: 13px; }
 .resend-area form { margin: 0; }
@@ -599,7 +641,6 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 <?php elseif ($view === 'success'): ?>
 <div class="success-mark" aria-hidden="true">✓</div>
 <h2>اكتملت خطوات استعادة كلمة المرور!</h2>
-<p class="subtitle">اكتمل العرض التجريبي لاستعادة كلمة المرور. لم يتم تغيير كلمة مرور أي حساب فعليًا.</p>
 <a class="btn" href="login.php">العودة إلى تسجيل الدخول</a>
 <?php endif; ?>
 
